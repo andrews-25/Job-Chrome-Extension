@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "JobFit Score",
+  "version": "0.1",
+  "description": "Shows how well a job listing matches your resume.",
+  "permissions": ["activeTab", "scripting"],
+  "host_permissions": ["https://*.indeed.com/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://*.indeed.com/*"],
+      "js": ["content.js"]
+    }
+  ]
+}
