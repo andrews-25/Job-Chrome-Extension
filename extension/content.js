@@ -1,14 +1,12 @@
 console.log("JobFit content script loaded.");
 
-// Process each job card once
-document.querySelectorAll("[data-jk]").forEach(card => {
-  // Skip if already processed
+// Helper to process a card
+function processJobCard(card) {
   if (card.dataset.logged) return;
 
   const titleEl = card.querySelector("h2 span");
   if (!titleEl) return;
 
-  // Add badge
   const badge = document.createElement("span");
   badge.textContent = " 7/10";
   badge.style.color = "white";
@@ -21,6 +19,25 @@ document.querySelectorAll("[data-jk]").forEach(card => {
 
   titleEl.appendChild(badge);
 
-  card.dataset.logged = "true"; // mark as processed
-  console.log("Found job:", titleEl.innerText);
+  card.dataset.logged = "true";
+  console.log("Found job:", titleEl.innerText); // may log twice
+}
+
+// Process initial jobs
+document.querySelectorAll("[data-jk]").forEach(processJobCard);
+
+// Watch for dynamically added jobs
+const observer = new MutationObserver(mutations => {
+  mutations.forEach(mutation => {
+    mutation.addedNodes.forEach(node => {
+      if (node.nodeType !== 1) return;
+
+      if (node.matches && node.matches("[data-jk]")) {
+        processJobCard(node);
+      }
+      node.querySelectorAll && node.querySelectorAll("[data-jk]").forEach(processJobCard);
+    });
+  });
 });
+
+observer.observe(document.body, { childList: true, subtree: true });
