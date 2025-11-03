@@ -1,11 +1,35 @@
 console.log("JobFit content script loaded.");
 
-// in-memory cache for clicked job descriptions
+// In-memory cache for scraped jobs
 const jobCache = {};
-// protect against races: pending token per jobId
+// Track ongoing requests to avoid race conditions
 const pendingTokens = {};
 
-// waitForDescription: resolves with the stable description text after it settles or contains the title
+// Local scoring function (placeholder for backend)
+async function getScore({ title, company, location, description }) {
+  await new Promise((res) => setTimeout(res, 500)); // simulate delay
+
+  const keywords = ["finance", "data", "analysis", "energy", "trading", "python", "sql", "market"];
+  const descLower = description.toLowerCase();
+
+  let matchCount = 0;
+  for (const word of keywords) {
+    if (descLower.includes(word)) matchCount++;
+  }
+
+  const score = Math.min(10, Math.round((matchCount / keywords.length) * 10)) || 5;
+
+  const feedback =
+    score > 8
+      ? "Strong match! This role fits your likely skill set well."
+      : score > 5
+      ? "Moderate match. Some overlap, but review the details."
+      : "Weak match. Probably not ideal for your profile.";
+
+  return { score, feedback };
+}
+
+// Wait for job description to stabilize or contain title
 async function waitForDescription({ title, timeout = 5000, pollInterval = 200, stableMs = 500 } = {}) {
   const start = Date.now();
   let last = "";
@@ -13,7 +37,9 @@ async function waitForDescription({ title, timeout = 5000, pollInterval = 200, s
 
   return new Promise((resolve) => {
     const check = () => {
-      const descEl = document.getElementById("jobDescriptionText") || document.querySelector(".jobsearch-JobComponent-description");
+      const descEl =
+        document.getElementById("jobDescriptionText") ||
+        document.querySelector(".jobsearch-JobComponent-description");
       const text = descEl ? descEl.innerText.trim() : "";
 
       if (title && text && text.toLowerCase().includes(title.toLowerCase())) {
@@ -41,13 +67,13 @@ async function waitForDescription({ title, timeout = 5000, pollInterval = 200, s
   });
 }
 
-// Create badge element
+// Create UI badge element
 function makeBadge(text = "Click") {
   const badge = document.createElement("span");
   badge.className = "jobfit-badge";
   badge.textContent = ` ${text}`;
   badge.style.color = "white";
-  badge.style.backgroundColor = "#2e7d32"; // green
+  badge.style.backgroundColor = "#2e7d32";
   badge.style.borderRadius = "4px";
   badge.style.padding = "2px 6px";
   badge.style.marginLeft = "6px";
@@ -57,7 +83,7 @@ function makeBadge(text = "Click") {
   return badge;
 }
 
-// Main per-card processing
+// Process individual job cards
 function processJobCard(card) {
   if (card.dataset.jobfitProcessed) return;
 
@@ -67,7 +93,6 @@ function processJobCard(card) {
   const jobId = card.getAttribute("data-jk") || "";
   const initialTitle = titleEl.innerText?.trim() || "";
 
-  // Create or reuse badge
   let badge = titleEl.querySelector(".jobfit-badge");
   if (!badge) {
     badge = makeBadge("Click to rate");
@@ -76,45 +101,67 @@ function processJobCard(card) {
     badge.style.backgroundColor = "#2e7d32";
   }
 
-  // Click handler: fetch all info from open description pane
   const clickHandler = async () => {
+    // Reset any other loading badges
+    Object.entries(pendingTokens).forEach(([id]) => {
+      if (id !== jobId) {
+        const other = document.querySelector(`[data-jk="${id}"] .jobfit-badge`);
+        if (other && other.textContent.includes("loading")) {
+          other.textContent = " Click to rate";
+          other.style.backgroundColor = "#2e7d32";
+        }
+        delete pendingTokens[id];
+      }
+    });
+
+    const token = Symbol();
+    if (jobId) pendingTokens[jobId] = token;
+
+    badge.textContent = " ⏳ loading";
+    badge.style.backgroundColor = "#f57c00";
+
     try {
-      const token = Symbol();
-      if (jobId) pendingTokens[jobId] = token;
-
-      badge.textContent = " ⏳ loading";
-      badge.style.backgroundColor = "#f57c00";
-
-      // Wait for the description panel
       const description = await waitForDescription({ title: initialTitle, timeout: 6000 });
+      if (pendingTokens[jobId] !== token) return;
 
       const detailPane = document.querySelector("#jobsearch-ViewjobPaneWrapper, .jobsearch-JobComponent");
-
-      const title = detailPane?.querySelector('h1')?.innerText?.trim() || initialTitle;
-      const company = (
+      const title = detailPane?.querySelector("h1")?.innerText?.trim() || initialTitle;
+      const company =
         detailPane?.querySelector('[data-testid="inlineHeader-companyName"]')?.innerText?.trim() ||
-        detailPane?.querySelector('.jobsearch-InlineCompanyRating div:first-child')?.innerText?.trim() ||
-        ""
-      );
-      const location = (
+        detailPane?.querySelector(".jobsearch-InlineCompanyRating div:first-child")?.innerText?.trim() ||
+        "";
+      const location =
         detailPane?.querySelector('[data-testid="inlineHeader-companyLocation"]')?.innerText?.trim() ||
-        detailPane?.querySelector('.jobsearch-JobInfoHeader-subtitle div:last-child')?.innerText?.trim() ||
-        ""
-      );
+        detailPane?.querySelector(".jobsearch-JobInfoHeader-subtitle div:last-child")?.innerText?.trim() ||
+        "";
 
-      if (jobId && pendingTokens[jobId] !== token) return;
+      if (pendingTokens[jobId] !== token) return;
 
-      jobCache[jobId || title] = { jobId, title, company, location, description };
+      // Compute local score
+      const { score, feedback } = await getScore({ title, company, location, description });
+      if (pendingTokens[jobId] !== token) return;
 
-      const placeholderScore = 7;
-      badge.textContent = ` ${placeholderScore}/10`;
-      badge.style.backgroundColor = "#2e7d32";
+      // Save results in cache
+      jobCache[jobId || title] = { jobId, title, company, location, description, score, feedback };
 
-      console.log("Job scraped:", { jobId, title, company, location, descriptionSnippet: description.slice(0, 120) });
+      badge.textContent = ` ${score}/10`;
+      badge.style.backgroundColor = score >= 8 ? "#2e7d32" : score >= 6 ? "#fbc02d" : "#c62828";
+
+      console.log("Job scraped:", {
+        jobId,
+        title,
+        company,
+        location,
+        score,
+        feedback,
+        descriptionSnippet: description.slice(0, 120),
+      });
     } catch (err) {
       console.error("JobFit error while fetching description:", err);
       badge.textContent = " !err";
       badge.style.backgroundColor = "#b00020";
+    } finally {
+      delete pendingTokens[jobId];
     }
   };
 
@@ -126,14 +173,14 @@ function processJobCard(card) {
   card.dataset.jobfitProcessed = "true";
 }
 
-// Initial run & MutationObserver
+// Initial scan for job cards
 document.querySelectorAll("[data-jk]").forEach(processJobCard);
 
-const observer = new MutationObserver(mutations => {
+// Watch for dynamically added job cards
+const observer = new MutationObserver((mutations) => {
   for (const mutation of mutations) {
     for (const node of mutation.addedNodes) {
       if (node.nodeType !== 1) continue;
-
       if (node.matches && node.matches("[data-jk]")) processJobCard(node);
       if (node.querySelectorAll) node.querySelectorAll("[data-jk]").forEach(processJobCard);
     }
