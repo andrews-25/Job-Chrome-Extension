@@ -1,5 +1,8 @@
 console.log("JobFit content script loaded.");
 
+// In-memory cache for clicked job descriptions
+const jobCache = {};
+
 // Helper to process a card
 function processJobCard(card) {
   if (card.dataset.logged) return;
@@ -7,6 +10,7 @@ function processJobCard(card) {
   const titleEl = card.querySelector("h2 span");
   if (!titleEl) return;
 
+  // Add badge
   const badge = document.createElement("span");
   badge.textContent = " 7/10";
   badge.style.color = "white";
@@ -16,11 +20,40 @@ function processJobCard(card) {
   badge.style.marginLeft = "6px";
   badge.style.fontSize = "0.8em";
   badge.style.fontWeight = "bold";
-
   titleEl.appendChild(badge);
 
+  // Grab company and location from tile
+  const companyEl = card.querySelector(".css-1afmp4o.e37uo190, .company_location.css-i375s1.e37uo190");
+  const locationEl = card.querySelector(".company_location.css-i375s1.e37uo190, .css-1restlb.eu4oa1w0");
+  const company = companyEl?.innerText?.trim() || "";
+  const location = locationEl?.innerText?.trim() || "";
+
+  // Store data on the card dataset (optional)
+  card.dataset.company = company;
+  card.dataset.location = location;
+
+  // Click listener to grab job description
+  card.addEventListener("click", () => {
+    const descEl = document.getElementById("jobDescriptionText");
+    const description = descEl?.innerText?.trim() || "";
+
+    if (description) {
+      jobCache[card.dataset.jk] = {
+        company,
+        location,
+        description
+      };
+      console.log("Job clicked:", {
+        title: titleEl.innerText,
+        company,
+        location,
+        description
+      });
+    }
+  });
+
   card.dataset.logged = "true";
-  console.log("Found job:", titleEl.innerText); // may log twice
+  console.log("Processed job:", titleEl.innerText);
 }
 
 // Process initial jobs
