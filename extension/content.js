@@ -5,24 +5,6 @@ const jobCache = {};
 // protect against races: pending token per jobId
 const pendingTokens = {};
 
-// Helpers for company/location selectors (fallback chaining)
-function extractCompany(card) {
-  return (
-    card.querySelector(".css-1afmp4o.e37uo190")?.innerText?.trim() ||
-    card.querySelector(".company_name, .companyName, .company")?.innerText?.trim() ||
-    card.querySelector(".company_location.css-i375s1.e37uo190")?.innerText?.trim() ||
-    ""
-  );
-}
-function extractLocation(card) {
-  return (
-    card.querySelector(".company_location.css-i375s1.e37uo190")?.innerText?.trim() ||
-    card.querySelector(".css-1restlb.eu4oa1w0")?.innerText?.trim() ||
-    card.querySelector(".location, .companyLocation")?.innerText?.trim() ||
-    ""
-  );
-}
-
 // waitForDescription: resolves with the stable description text after it settles or contains the title
 async function waitForDescription({ title, timeout = 5000, pollInterval = 200, stableMs = 500 } = {}) {
   const start = Date.now();
@@ -34,23 +16,19 @@ async function waitForDescription({ title, timeout = 5000, pollInterval = 200, s
       const descEl = document.getElementById("jobDescriptionText") || document.querySelector(".jobsearch-JobComponent-description");
       const text = descEl ? descEl.innerText.trim() : "";
 
-      // If description contains the title (strong signal), accept it immediately.
       if (title && text && text.toLowerCase().includes(title.toLowerCase())) {
         resolve(text);
         return;
       }
 
-      // If text changed, reset stability timer
       if (text !== last) {
         last = text;
         stableSince = Date.now();
       } else if (text && stableSince && Date.now() - stableSince >= stableMs) {
-        // text unchanged for stableMs -> accept
         resolve(text);
         return;
       }
 
-      // Timeout fallback: if we've waited too long, accept whatever we have (may be empty)
       if (Date.now() - start > timeout) {
         resolve(last);
         return;
@@ -59,7 +37,6 @@ async function waitForDescription({ title, timeout = 5000, pollInterval = 200, s
       setTimeout(check, pollInterval);
     };
 
-    // immediate check first
     check();
   });
 }
@@ -88,7 +65,7 @@ function processJobCard(card) {
   if (!titleEl) return;
 
   const jobId = card.getAttribute("data-jk") || "";
-  const titleText = titleEl.innerText?.trim() || "";
+  const initialTitle = titleEl.innerText?.trim() || "";
 
   // Create or reuse badge
   let badge = titleEl.querySelector(".jobfit-badge");
@@ -96,62 +73,44 @@ function processJobCard(card) {
     badge = makeBadge("Click to rate");
     titleEl.appendChild(badge);
   } else {
-    // ensure styling if accidentally lost
     badge.style.backgroundColor = "#2e7d32";
   }
 
-  // Extract company & location immediately (fixes issue #1)
-  const company = extractCompany(card);
-  const location = extractLocation(card);
-
-  // store on dataset for quick access
-  if (jobId) {
-    card.dataset.jobfitCompany = company;
-    card.dataset.jobfitLocation = location;
-  }
-
-  // Click handler: when user opens the listing, grab the (full) description and store it
-  const clickHandler = async (ev) => {
+  // Click handler: fetch all info from open description pane
+  const clickHandler = async () => {
     try {
-      // allow default navigation / panel opening to proceed
-      // generate a token so late-arriving responses don't overwrite newer ones
       const token = Symbol();
       if (jobId) pendingTokens[jobId] = token;
 
-      // immediate UX update
       badge.textContent = " ⏳ loading";
-      badge.style.backgroundColor = "#f57c00"; // orange for loading
+      badge.style.backgroundColor = "#f57c00";
 
-      // wait for the description panel to settle
-      const description = await waitForDescription({ title: titleText, timeout: 6000 });
+      // Wait for the description panel
+      const description = await waitForDescription({ title: initialTitle, timeout: 6000 });
 
-      // ensure this result is still desired for this job (no newer token replaced it)
-      if (jobId && pendingTokens[jobId] !== token) {
-        // dropped because a newer click/request for same jobId exists
-        return;
-      }
+      const detailPane = document.querySelector("#jobsearch-ViewjobPaneWrapper, .jobsearch-JobComponent");
 
-      // save to cache
-      jobCache[jobId || titleText] = {
-        jobId,
-        title: titleText,
-        company,
-        location,
-        description
-      };
+      const title = detailPane?.querySelector('h1')?.innerText?.trim() || initialTitle;
+      const company = (
+        detailPane?.querySelector('[data-testid="inlineHeader-companyName"]')?.innerText?.trim() ||
+        detailPane?.querySelector('.jobsearch-InlineCompanyRating div:first-child')?.innerText?.trim() ||
+        ""
+      );
+      const location = (
+        detailPane?.querySelector('[data-testid="inlineHeader-companyLocation"]')?.innerText?.trim() ||
+        detailPane?.querySelector('.jobsearch-JobInfoHeader-subtitle div:last-child')?.innerText?.trim() ||
+        ""
+      );
 
-      // Update badge to show we have a cached description (placeholder score for now)
-      const placeholderScore = 7; // swap with real compute later
+      if (jobId && pendingTokens[jobId] !== token) return;
+
+      jobCache[jobId || title] = { jobId, title, company, location, description };
+
+      const placeholderScore = 7;
       badge.textContent = ` ${placeholderScore}/10`;
       badge.style.backgroundColor = "#2e7d32";
 
-      console.log("Job scraped:", {
-        jobId,
-        title: titleText,
-        company,
-        location,
-        descriptionSnippet: description?.slice(0, 200)
-      });
+      console.log("Job scraped:", { jobId, title, company, location, descriptionSnippet: description.slice(0, 120) });
     } catch (err) {
       console.error("JobFit error while fetching description:", err);
       badge.textContent = " !err";
@@ -159,18 +118,15 @@ function processJobCard(card) {
     }
   };
 
-  // Attach listener once
   if (!card.dataset.jobfitListener) {
-    card.addEventListener("click", clickHandler, { capture: true }); // capture so we run early
+    card.addEventListener("click", clickHandler, { capture: true });
     card.dataset.jobfitListener = "true";
   }
 
   card.dataset.jobfitProcessed = "true";
-  // optional console log
-  // console.log("Processed job:", titleText, company, location);
 }
 
-// Initial run & MutationObserver to handle dynamic loading
+// Initial run & MutationObserver
 document.querySelectorAll("[data-jk]").forEach(processJobCard);
 
 const observer = new MutationObserver(mutations => {
@@ -178,12 +134,8 @@ const observer = new MutationObserver(mutations => {
     for (const node of mutation.addedNodes) {
       if (node.nodeType !== 1) continue;
 
-      if (node.matches && node.matches("[data-jk]")) {
-        processJobCard(node);
-      }
-      if (node.querySelectorAll) {
-        node.querySelectorAll("[data-jk]").forEach(processJobCard);
-      }
+      if (node.matches && node.matches("[data-jk]")) processJobCard(node);
+      if (node.querySelectorAll) node.querySelectorAll("[data-jk]").forEach(processJobCard);
     }
   }
 });
