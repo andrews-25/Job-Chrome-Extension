@@ -3,8 +3,16 @@
   "name": "JobFit Score",
   "version": "0.1",
   "description": "Shows how well a job listing matches your resume.",
-  "permissions": ["activeTab", "scripting"],
+  "permissions": ["activeTab", "scripting", "storage"],
   "host_permissions": ["https://*.indeed.com/*"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
   "content_scripts": [
     {
       "matches": ["https://*.indeed.com/*"],
