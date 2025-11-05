@@ -1,35 +1,67 @@
 # main.py
-from fastapi import FastAPI
+from fastapi import FastAPI, File, UploadFile, Form
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from openai import OpenAI
+import PyPDF2
+import io
+import numpy as np
+import os
 
 app = FastAPI()
 
-# Define the shape of the request (data sent from the extension)
-class JobRequest(BaseModel):
-    title: str
-    company: str
-    location: str
-    description: str
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-# Define the shape of the response
-class JobResponse(BaseModel):
-    score: int
-    feedback: str
+client = OpenAI()
+EMBEDDING_PATH = "resume_embedding.npy"
 
-@app.post("/getscore", response_model=JobResponse)
-def score_job(job: JobRequest):
-    # Temporary local scoring logic
-    keywords = ["finance", "data", "analysis", "energy", "trading", "python", "sql", "market"]
-    desc_lower = job.description.lower()
+# ---- Upload resume and save embedding ----
+@app.post("/upload_resume")
+async def upload_resume(file: UploadFile = File(...)):
+    pdf_bytes = await file.read()
+    pdf_reader = PyPDF2.PdfReader(io.BytesIO(pdf_bytes))
+    resume_text = ""
+    for page in pdf_reader.pages:
+        resume_text += page.extract_text() or ""
 
-    match_count = sum(1 for word in keywords if word in desc_lower)
-    score = min(10, round(match_count / len(keywords) * 10)) or 5
+    # Create embedding and save locally
+    resume_embedding = client.embeddings.create(
+        model="text-embedding-3-small",
+        input=resume_text
+    ).data[0].embedding
 
-    if score > 8:
-        feedback = "Strong match! This role fits your likely skill set well."
-    elif score > 5:
-        feedback = "Moderate match. Some overlap, but review the details."
-    else:
-        feedback = "Weak match. Probably not ideal for your profile."
+    np.save(EMBEDDING_PATH, np.array(resume_embedding))
+    return {"message": "Resume embedding saved successfully."}
 
-    return JobResponse(score=score, feedback=feedback)
+
+# ---- Compare stored embedding to job description
+@app.post("/getscore")
+async def get_score(job_description: str = Form(...)):
+    if not os.path.exists(EMBEDDING_PATH):
+        return {"error": "No stored resume embedding found. Please upload your resume first."}
+
+    # Load the stored resume embedding
+    resume_embedding = np.load(EMBEDDING_PATH)
+
+    # Create embedding for job description
+    job_embedding = client.embeddings.create(
+        model="text-embedding-3-small",
+        input=job_description
+    ).data[0].embedding
+
+    # Compute cosine similarity
+    def cosine_similarity(a, b):
+        a, b = np.array(a), np.array(b)
+        return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+
+    score = cosine_similarity(resume_embedding, job_embedding)
+    score_percent = round(score * 100, 2)
+    feedback = f"Your resume matches this job posting by approximately {score_percent}%."
+
+    return {"score": score_percent, "feedback": feedback}
