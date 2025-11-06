@@ -6,6 +6,7 @@ import PyPDF2
 import io
 import numpy as np
 import os
+from pydantic import BaseModel
 
 app = FastAPI()
 
@@ -43,19 +44,10 @@ class JobRequest(BaseModel):
     description: str
     resume_embedding: list[float]
 
-#---- Compare stored embedding to job description (future use) ----
 @app.post("/getscore")
-async def get_score(data: JobRequest):
-    job_id = data.job_id
-    description = data.description
-    resume_embedding = data.resume_embedding
+async def get_score(request: JobRequest):
+    desc_length = len(request.description.split())
+    embed_sum = sum(request.resume_embedding)
+    score = round((desc_length * 0.05 + embed_sum) % 10, 2)
 
-    desc_score = len(description.split()) % 10  # vary by job description size
-    embed_score = int(sum(embedding) % 10) if embedding else 0
-
-    combined = (desc_score + embed_score) / 2
-    score = round(min(10, max(0, combined)), 1)
-
-    return {"job_id": job_id,
-            "score": score 
-    }
+    return {"job_id": request.job_id, "score": score}

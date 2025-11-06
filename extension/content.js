@@ -5,13 +5,55 @@ const jobCache = {};
 // Track ongoing requests to avoid race conditions
 const pendingTokens = {};
 
-// Local scoring function (placeholder for backend)
-async function getScore({ title, company, location, description }) {
+// ---- Connect to backend ----
+async function getScore({ jobId, title, company, location, description }) {
+  try {
+    // 1. Retrieve resume embedding from Chrome local storage
+    const { resume_embedding } = await chrome.runtime.sendMessage({
+    action: "GET_RESUME_EMBEDDING",
+  }); 
+    if (!resume_embedding) {
+      console.warn("No resume embedding found in chrome.storage.local");
+      return { score: 0, feedback: "Resume embedding not found." };
+    }
 
-  return {score};
+    // Debug check
+    console.log("Sending to backend:", {
+      job_id: jobId,
+      description: description.slice(0, 60),
+      resume_embedding_preview: resume_embedding.slice(0, 5),
+    });
+
+    // 2. Send POST request to backend
+    const response = await fetch("http://127.0.0.1:8000/getscore", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        job_id: jobId,
+        description,
+        resume_embedding,
+      }),
+    });
+
+    if (!response.ok) throw new Error(`Server error: ${response.status}`);
+
+    const data = await response.json();
+
+    // 3. Save job ID + score pair to local storage
+    const existingScores = (await chrome.storage.local.get("jobScores")).jobScores || {};
+    existingScores[jobId] = data.score;
+    await chrome.storage.local.set({ jobScores: existingScores });
+
+    // 4. Return score & feedback to UI
+    return { score: data.score, feedback: data.feedback || "OK" };
+
+  } catch (err) {
+    console.error("Error in getScore:", err);
+    return { score: 0, feedback: "Error fetching score." };
+  }
 }
 
-// Wait for job description to stabilize or contain title
+// ---- Wait for job description to stabilize ----
 async function waitForDescription({ title, timeout = 5000, pollInterval = 200, stableMs = 500 } = {}) {
   const start = Date.now();
   let last = "";
@@ -49,7 +91,7 @@ async function waitForDescription({ title, timeout = 5000, pollInterval = 200, s
   });
 }
 
-// Create UI badge element
+// ---- Create UI badge element ----
 function makeBadge(text = "Click") {
   const badge = document.createElement("span");
   badge.className = "jobfit-badge";
@@ -65,7 +107,7 @@ function makeBadge(text = "Click") {
   return badge;
 }
 
-// Process individual job cards
+// ---- Process individual job cards ----
 function processJobCard(card) {
   if (card.dataset.jobfitProcessed) return;
 
@@ -84,7 +126,7 @@ function processJobCard(card) {
   }
 
   const clickHandler = async () => {
-    // Reset any other loading badges
+    // Reset other badges
     Object.entries(pendingTokens).forEach(([id]) => {
       if (id !== jobId) {
         const other = document.querySelector(`[data-jk="${id}"] .jobfit-badge`);
@@ -119,14 +161,14 @@ function processJobCard(card) {
 
       if (pendingTokens[jobId] !== token) return;
 
-      // Compute local score
-      const { score, feedback } = await getScore({ title, company, location, description });
+      // ---- Call backend to get score ----
+      const { score, feedback } = await getScore({ jobId, title, company, location, description });
       if (pendingTokens[jobId] !== token) return;
 
-      // Save results in cache
+      // Cache result
       jobCache[jobId || title] = { jobId, title, company, location, description, score, feedback };
 
-      badge.textContent = ` ${score}/10`;
+      badge.textContent = score;
       badge.style.backgroundColor = score >= 8 ? "#2e7d32" : score >= 6 ? "#fbc02d" : "#c62828";
 
       console.log("Job scraped:", {
@@ -139,9 +181,8 @@ function processJobCard(card) {
         descriptionSnippet: description.slice(0, 120),
       });
 
-
     } catch (err) {
-      console.error("JobFit error while fetching description:", err);
+      console.error("JobFit error:", err);
       badge.textContent = " !err";
       badge.style.backgroundColor = "#b00020";
     } finally {
@@ -157,10 +198,10 @@ function processJobCard(card) {
   card.dataset.jobfitProcessed = "true";
 }
 
-// Initial scan for job cards
+// ---- Initial scan for job cards ----
 document.querySelectorAll("[data-jk]").forEach(processJobCard);
 
-// Watch for dynamically added job cards
+// ---- Watch for dynamically added job cards ----
 const observer = new MutationObserver((mutations) => {
   for (const mutation of mutations) {
     for (const node of mutation.addedNodes) {
