@@ -2,7 +2,7 @@ const uploadBtn = document.getElementById("uploadBtn");
 const fileInput = document.getElementById("resumeFile");
 const statusEl = document.getElementById("status");
 
-// Upload and extract resume text locally
+// Upload resume PDF and store returned embedding
 uploadBtn.addEventListener("click", async () => {
   const file = fileInput.files[0];
   if (!file) {
@@ -11,43 +11,39 @@ uploadBtn.addEventListener("click", async () => {
     return;
   }
 
-  statusEl.textContent = "Processing...";
+  statusEl.textContent = "Uploading...";
   statusEl.style.color = "black";
 
   try {
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      const pdfData = new Uint8Array(e.target.result);
-      const pdfjsLib = await import("https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/build/pdf.min.mjs");
-      const pdf = await pdfjsLib.getDocument({ data: pdfData }).promise;
+    const formData = new FormData();
+    formData.append("file", file);
 
-      let text = "";
-      for (let i = 0; i < pdf.numPages; i++) {
-        const page = await pdf.getPage(i + 1);
-        const content = await page.getTextContent();
-        text += content.items.map((item) => item.str).join(" ") + "\n";
-      }
+    const response = await fetch("http://localhost:8000/upload_resume", {
+      method: "POST",
+      body: formData,
+    });
 
-      // Store the resume text locally
-      await chrome.storage.local.set({ resumeText: text });
+    const result = await response.json();
+    console.log("Backend response:", result);
 
-      statusEl.textContent = "✅ Resume uploaded and saved locally!";
-      statusEl.style.color = "green";
-    };
+    // Store embedding locally in Chrome
+    const embedding = result.embedding_preview || [];
+    await chrome.storage.local.set({ resumeEmbedding: embedding });
 
-    reader.readAsArrayBuffer(file);
+    statusEl.textContent = "✅ Resume uploaded and embedding saved!";
+    statusEl.style.color = "green";
   } catch (err) {
-    console.error("Error reading PDF:", err);
-    statusEl.textContent = "Failed to process resume.";
+    console.error("Upload error:", err);
+    statusEl.textContent = "Failed to upload resume.";
     statusEl.style.color = "red";
   }
 });
 
-// Check if resume exists on load
+// Check if embedding exists on load
 window.addEventListener("DOMContentLoaded", async () => {
-  const { resumeText } = await chrome.storage.local.get("resumeText");
-  if (resumeText) {
-    statusEl.textContent = "✅ Resume already uploaded";
+  const { resumeEmbedding } = await chrome.storage.local.get("resumeEmbedding");
+  if (resumeEmbedding) {
+    statusEl.textContent = "✅ Resume embedding already uploaded";
     statusEl.style.color = "green";
   } else {
     statusEl.textContent = "⚠️ No resume uploaded";
