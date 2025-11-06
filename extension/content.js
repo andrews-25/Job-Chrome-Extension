@@ -1,54 +1,42 @@
-console.log("JobFit content script loaded.");
+console.log("[JobFit] Content script loaded.");
 
-// In-memory cache for scraped jobs
+// ---- In-memory cache ----
 const jobCache = {};
-// Track ongoing requests to avoid race conditions
 const pendingTokens = {};
+
+// ---- Utility: Check if resume exists ----
+async function hasResume() {
+  const { resumeEmbedding, resumeFilename } = await chrome.storage.local.get([
+    "resumeEmbedding",
+    "resumeFilename",
+  ]);
+  return !!(resumeEmbedding && resumeFilename);
+}
 
 // ---- Connect to backend ----
 async function getScore({ jobId, title, company, location, description }) {
   try {
-    // 1. Retrieve resume embedding from Chrome local storage
     const { resume_embedding } = await chrome.runtime.sendMessage({
-    action: "GET_RESUME_EMBEDDING",
-  }); 
-    if (!resume_embedding) {
-      console.warn("No resume embedding found in chrome.storage.local");
-      return { score: 0, feedback: "Resume embedding not found." };
-    }
-
-    // Debug check
-    console.log("Sending to backend:", {
-      job_id: jobId,
-      description: description.slice(0, 60),
-      resume_embedding_preview: resume_embedding.slice(0, 5),
+      action: "GET_RESUME_EMBEDDING",
     });
+    if (!resume_embedding) return { score: 0, feedback: "Resume embedding not found." };
 
-    // 2. Send POST request to backend
     const response = await fetch("http://127.0.0.1:8000/getscore", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        job_id: jobId,
-        description,
-        resume_embedding,
-      }),
+      body: JSON.stringify({ job_id: jobId, description, resume_embedding }),
     });
 
     if (!response.ok) throw new Error(`Server error: ${response.status}`);
-
     const data = await response.json();
 
-    // 3. Save job ID + score pair to local storage
     const existingScores = (await chrome.storage.local.get("jobScores")).jobScores || {};
     existingScores[jobId] = data.score;
     await chrome.storage.local.set({ jobScores: existingScores });
 
-    // 4. Return score & feedback to UI
     return { score: data.score, feedback: data.feedback || "OK" };
-
   } catch (err) {
-    console.error("Error in getScore:", err);
+    console.error("[JobFit] getScore error:", err);
     return { score: 0, feedback: "Error fetching score." };
   }
 }
@@ -86,47 +74,57 @@ async function waitForDescription({ title, timeout = 5000, pollInterval = 200, s
 
       setTimeout(check, pollInterval);
     };
-
     check();
   });
 }
 
-// ---- Create UI badge element ----
-function makeBadge(text = "Click") {
-  const badge = document.createElement("span");
-  badge.className = "jobfit-badge";
-  badge.textContent = ` ${text}`;
-  badge.style.color = "white";
-  badge.style.backgroundColor = "#2e7d32";
-  badge.style.borderRadius = "4px";
-  badge.style.padding = "2px 6px";
-  badge.style.marginLeft = "6px";
-  badge.style.fontSize = "0.8em";
-  badge.style.fontWeight = "700";
-  badge.style.cursor = "default";
+// ---- Create or update badge ----
+function createOrUpdateBadge(card, resumeExists) {
+  const titleEl = card.querySelector("h2 span") || card.querySelector("h2");
+  if (!titleEl) return null;
+
+  let badge = titleEl.querySelector(".jobfit-badge");
+
+  if (!badge) {
+    badge = document.createElement("span");
+    badge.className = "jobfit-badge";
+    badge.style.color = "white";
+    badge.style.borderRadius = "4px";
+    badge.style.padding = "2px 6px";
+    badge.style.marginLeft = "6px";
+    badge.style.fontSize = "0.8em";
+    badge.style.fontWeight = "700";
+    badge.style.cursor = "default";
+    titleEl.appendChild(badge);
+  }
+
+  // Reset badge text & color if no score exists yet
+  if (!badge.dataset.scored) {
+    badge.textContent = resumeExists ? " Click to rate" : " Upload Resume";
+    badge.style.backgroundColor = resumeExists ? "#2e7d32" : "#666666ff";
+  }
+
   return badge;
 }
 
-// ---- Process individual job cards ----
-function processJobCard(card) {
-  if (card.dataset.jobfitProcessed) return;
-
-  const titleEl = card.querySelector("h2 span") || card.querySelector("h2");
-  if (!titleEl) return;
+// ---- Process a single job card ----
+async function processJobCard(card) {
+  if (card.dataset.jobfitProcessed === "true") return;
+  card.dataset.jobfitProcessed = "true";
 
   const jobId = card.getAttribute("data-jk") || "";
-  const initialTitle = titleEl.innerText?.trim() || "";
+  const initialTitle = (card.querySelector("h2 span") || card.querySelector("h2"))?.innerText?.trim() || "";
 
-  let badge = titleEl.querySelector(".jobfit-badge");
-  if (!badge) {
-    badge = makeBadge("Click to rate");
-    titleEl.appendChild(badge);
-  } else {
-    badge.style.backgroundColor = "#2e7d32";
-  }
+  const resumeExists = await hasResume();
+  const badge = createOrUpdateBadge(card, resumeExists);
+  if (!badge) return;
 
   const clickHandler = async () => {
-    // Reset other badges
+    // Re-check resume existence at click time instead of using captured value
+    const currentResumeExists = await hasResume();
+    if (!currentResumeExists) return;
+
+    // Reset other loading badges
     Object.entries(pendingTokens).forEach(([id]) => {
       if (id !== jobId) {
         const other = document.querySelector(`[data-jk="${id}"] .jobfit-badge`);
@@ -139,7 +137,7 @@ function processJobCard(card) {
     });
 
     const token = Symbol();
-    if (jobId) pendingTokens[jobId] = token;
+    pendingTokens[jobId] = token;
 
     badge.textContent = " ⏳ loading";
     badge.style.backgroundColor = "#f57c00";
@@ -159,30 +157,18 @@ function processJobCard(card) {
         detailPane?.querySelector(".jobsearch-JobInfoHeader-subtitle div:last-child")?.innerText?.trim() ||
         "";
 
-      if (pendingTokens[jobId] !== token) return;
-
-      // ---- Call backend to get score ----
       const { score, feedback } = await getScore({ jobId, title, company, location, description });
       if (pendingTokens[jobId] !== token) return;
 
-      // Cache result
       jobCache[jobId || title] = { jobId, title, company, location, description, score, feedback };
 
       badge.textContent = score;
+      badge.dataset.scored = "true";
       badge.style.backgroundColor = score >= 8 ? "#2e7d32" : score >= 6 ? "#fbc02d" : "#c62828";
 
-      console.log("Job scraped:", {
-        jobId,
-        title,
-        company,
-        location,
-        score,
-        feedback,
-        descriptionSnippet: description.slice(0, 120),
-      });
-
+      console.log("[JobFit] Job scored:", { jobId, title, company, score, feedback });
     } catch (err) {
-      console.error("JobFit error:", err);
+      console.error("[JobFit] JobFit error:", err);
       badge.textContent = " !err";
       badge.style.backgroundColor = "#b00020";
     } finally {
@@ -194,14 +180,12 @@ function processJobCard(card) {
     card.addEventListener("click", clickHandler, { capture: true });
     card.dataset.jobfitListener = "true";
   }
-
-  card.dataset.jobfitProcessed = "true";
 }
 
-// ---- Initial scan for job cards ----
+// ---- Initial scan ----
 document.querySelectorAll("[data-jk]").forEach(processJobCard);
 
-// ---- Watch for dynamically added job cards ----
+// ---- Observe dynamic job cards ----
 const observer = new MutationObserver((mutations) => {
   for (const mutation of mutations) {
     for (const node of mutation.addedNodes) {
@@ -211,5 +195,24 @@ const observer = new MutationObserver((mutations) => {
     }
   }
 });
-
 observer.observe(document.body, { childList: true, subtree: true });
+
+// ---- Refresh badges & click handlers on resume change ----
+chrome.runtime.onMessage.addListener(async (msg) => {
+  if (msg.action === "RESUME_UPLOADED" || msg.action === "RESUME_CLEARED") {
+    console.log("[JobFit] Refreshing badges due to", msg.action);
+    const cards = document.querySelectorAll("[data-jk]");
+    for (const card of cards) {
+      // Reset BOTH flags so processJobCard will fully reinitialize
+      card.dataset.jobfitProcessed = "false";
+      card.dataset.jobfitListener = "false";
+
+      // Reset scored flag so badge updates
+      const badge = (card.querySelector("h2 span") || card.querySelector("h2"))?.querySelector(".jobfit-badge");
+      if (badge) badge.dataset.scored = "";
+
+      await processJobCard(card);
+    }
+    console.log("[JobFit] Badge & handler refresh complete");
+  }
+});
