@@ -1,10 +1,13 @@
 console.log("JobFit content script loaded.");
 
+// In-memory cache for scraped jobs
 const jobCache = {};
+// Track ongoing requests to avoid race conditions
 const pendingTokens = {};
 
+// Local scoring function (placeholder for backend)
 async function getScore({ title, company, location, description }) {
-  await new Promise((res) => setTimeout(res, 500));
+  await new Promise((res) => setTimeout(res, 500)); // simulate delay
 
   const keywords = ["finance", "data", "analysis", "energy", "trading", "python", "sql", "market"];
   const descLower = description.toLowerCase();
@@ -26,6 +29,7 @@ async function getScore({ title, company, location, description }) {
   return { score, feedback };
 }
 
+// Wait for job description to stabilize or contain title
 async function waitForDescription({ title, timeout = 5000, pollInterval = 200, stableMs = 500 } = {}) {
   const start = Date.now();
   let last = "";
@@ -63,6 +67,7 @@ async function waitForDescription({ title, timeout = 5000, pollInterval = 200, s
   });
 }
 
+// Create UI badge element
 function makeBadge(text = "Click") {
   const badge = document.createElement("span");
   badge.className = "jobfit-badge";
@@ -78,7 +83,8 @@ function makeBadge(text = "Click") {
   return badge;
 }
 
-async function processJobCard(card) {
+// Process individual job cards
+function processJobCard(card) {
   if (card.dataset.jobfitProcessed) return;
 
   const titleEl = card.querySelector("h2 span") || card.querySelector("h2");
@@ -91,38 +97,12 @@ async function processJobCard(card) {
   if (!badge) {
     badge = makeBadge("Click to rate");
     titleEl.appendChild(badge);
+  } else {
+    badge.style.backgroundColor = "#2e7d32";
   }
-
-  // --- NEW: check if user has a resume uploaded ---
-  const { resumeFilename } = await chrome.storage.local.get("resumeFilename");
-
-  if (!resumeFilename) {
-    badge.textContent = " Upload Resume";
-    badge.style.backgroundColor = "#757575";
-    badge.style.cursor = "pointer";
-
-    // Click opens the popup
-    badge.onclick = () => {
-      chrome.runtime.sendMessage({ action: "openPopup" });
-    };
-
-    card.dataset.jobfitProcessed = "true";
-    return; // Skip scoring logic if no resume
-  }
-
-  // If resume exists, normal badge
-  badge.textContent = " Click to rate";
-  badge.style.backgroundColor = "#2e7d32";
-  badge.style.cursor = "default";
 
   const clickHandler = async () => {
-    const { resumeText } = await chrome.storage.local.get("resumeText");
-    if (!resumeText) {
-      badge.textContent = " Upload resume to get eval";
-      badge.style.backgroundColor = "#757575";
-      return;
-    }
-
+    // Reset any other loading badges
     Object.entries(pendingTokens).forEach(([id]) => {
       if (id !== jobId) {
         const other = document.querySelector(`[data-jk="${id}"] .jobfit-badge`);
@@ -157,9 +137,11 @@ async function processJobCard(card) {
 
       if (pendingTokens[jobId] !== token) return;
 
+      // Compute local score
       const { score, feedback } = await getScore({ title, company, location, description });
       if (pendingTokens[jobId] !== token) return;
 
+      // Save results in cache
       jobCache[jobId || title] = { jobId, title, company, location, description, score, feedback };
 
       badge.textContent = ` ${score}/10`;
@@ -191,8 +173,10 @@ async function processJobCard(card) {
   card.dataset.jobfitProcessed = "true";
 }
 
+// Initial scan for job cards
 document.querySelectorAll("[data-jk]").forEach(processJobCard);
 
+// Watch for dynamically added job cards
 const observer = new MutationObserver((mutations) => {
   for (const mutation of mutations) {
     for (const node of mutation.addedNodes) {
