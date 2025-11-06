@@ -13,12 +13,23 @@
       margin-top: 8px;
       font-size: 0.9em;
     }
+    #clearBtn {
+      margin-top: 6px;
+      display: inline-block;
+      background-color: #b00020;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      padding: 4px 8px;
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
   <h3>Upload Your Resume</h3>
   <input type="file" id="resumeFile" accept="application/pdf" />
   <button id="uploadBtn">Upload</button>
+  <button id="clearBtn">Clear Resume</button>
   <p id="status">⚠️ No resume uploaded</p>
 
   <script src="popup.js"></script>

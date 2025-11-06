@@ -4,7 +4,11 @@
   "version": "0.1",
   "description": "Shows how well a job listing matches your resume.",
   "permissions": ["activeTab", "scripting", "storage"],
-  "host_permissions": ["https://*.indeed.com/*"],
+  "host_permissions": [
+    "https://*.indeed.com/*",
+    "http://127.0.0.1:8000/*",
+    "http://localhost:8000/*"
+  ],
   "action": {
     "default_popup": "popup.html",
     "default_icon": {

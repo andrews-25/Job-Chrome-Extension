@@ -1,6 +1,24 @@
 const uploadBtn = document.getElementById("uploadBtn");
+const clearBtn = document.getElementById("clearBtn");
 const fileInput = document.getElementById("resumeFile");
 const statusEl = document.getElementById("status");
+
+// Update button text based on whether a resume exists
+async function updateButtonText() {
+  const { resumeFilename } = await chrome.storage.local.get("resumeFilename");
+  if (resumeFilename) {
+    uploadBtn.textContent = `Change Resume (${resumeFilename})`;
+    statusEl.textContent = `✅ Current resume: ${resumeFilename}`;
+    statusEl.style.color = "green";
+  } else {
+    uploadBtn.textContent = "Upload Resume";
+    statusEl.textContent = "⚠️ No resume uploaded";
+    statusEl.style.color = "orange";
+  }
+}
+
+// Call on load
+window.addEventListener("DOMContentLoaded", updateButtonText);
 
 // Upload resume PDF and store returned embedding
 uploadBtn.addEventListener("click", async () => {
@@ -18,35 +36,42 @@ uploadBtn.addEventListener("click", async () => {
     const formData = new FormData();
     formData.append("file", file);
 
-    const response = await fetch("http://localhost:8000/upload_resume", {
+    console.log("Sending file to backend:", file);
+
+    const response = await fetch("http://127.0.0.1:8000/upload_resume", {
       method: "POST",
       body: formData,
     });
 
+    console.log("Raw response object:", response);
+
+    if (!response.ok) {
+      const text = await response.text(); // get error text for logging
+      console.error("Server responded with error:", text);
+      throw new Error(`HTTP ${response.status} - ${response.statusText}`);
+    }
+
     const result = await response.json();
-    console.log("Backend response:", result);
+    console.log("Parsed JSON response from backend:", result);
 
-    // Store embedding locally in Chrome
     const embedding = result.embedding_preview || [];
-    await chrome.storage.local.set({ resumeEmbedding: embedding });
+    await chrome.storage.local.set({ resumeEmbedding: embedding, resumeFilename: file.name });
 
-    statusEl.textContent = "✅ Resume uploaded and embedding saved!";
+    statusEl.textContent = `✅ Resume uploaded: ${file.name}`;
     statusEl.style.color = "green";
+    updateButtonText();
   } catch (err) {
     console.error("Upload error:", err);
-    statusEl.textContent = "Failed to upload resume.";
+    statusEl.textContent = `Failed to upload: ${err.message}`;
     statusEl.style.color = "red";
   }
 });
 
-// Check if embedding exists on load
-window.addEventListener("DOMContentLoaded", async () => {
-  const { resumeEmbedding } = await chrome.storage.local.get("resumeEmbedding");
-  if (resumeEmbedding) {
-    statusEl.textContent = "✅ Resume embedding already uploaded";
-    statusEl.style.color = "green";
-  } else {
-    statusEl.textContent = "⚠️ No resume uploaded";
-    statusEl.style.color = "orange";
-  }
+// Clear resume embedding
+clearBtn.addEventListener("click", async () => {
+  await chrome.storage.local.remove(["resumeEmbedding", "resumeFilename"]);
+  statusEl.textContent = "⚠️ No resume uploaded";
+  statusEl.style.color = "orange";
+  uploadBtn.textContent = "Upload Resume";
+  fileInput.value = "";
 });
