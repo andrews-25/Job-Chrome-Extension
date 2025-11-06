@@ -97,19 +97,18 @@ async function processJobCard(card) {
   const { resumeFilename } = await chrome.storage.local.get("resumeFilename");
 
   if (!resumeFilename) {
-  badge.textContent = " Upload resume to get eval";
-  badge.style.backgroundColor = "#757575";
-  badge.style.cursor = "pointer";
+    badge.textContent = " Upload Resume";
+    badge.style.backgroundColor = "#757575";
+    badge.style.cursor = "pointer";
 
-  // Click opens the popup and stops propagation
-  badge.onclick = (e) => {
-    e.stopPropagation();
-    chrome.runtime.sendMessage({ action: "openPopup" });
-  };
+    // Click opens the popup
+    badge.onclick = () => {
+      chrome.runtime.sendMessage({ action: "openPopup" });
+    };
 
-  card.dataset.jobfitProcessed = "true";
-  return; // Skip scoring logic
-}
+    card.dataset.jobfitProcessed = "true";
+    return; // Skip scoring logic if no resume
+  }
 
   // If resume exists, normal badge
   badge.textContent = " Click to rate";
