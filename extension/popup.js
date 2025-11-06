@@ -3,24 +3,33 @@ const clearBtn = document.getElementById("clearBtn");
 const fileInput = document.getElementById("resumeFile");
 const statusEl = document.getElementById("status");
 
-// Update button text based on whether a resume exists
-async function updateButtonText() {
+// Utility to show/hide elements
+function toggleElements({ showUpload = true, showCurrent = false }) {
+  fileInput.style.display = showUpload ? "block" : "none";
+  uploadBtn.style.display = showUpload ? "inline-block" : "none";
+
+  clearBtn.style.display = showCurrent ? "inline-block" : "none";
+}
+
+// Update UI based on whether a resume exists
+async function updateUI() {
   const { resumeFilename } = await chrome.storage.local.get("resumeFilename");
+
   if (resumeFilename) {
-    uploadBtn.textContent = `Change Resume (${resumeFilename})`;
     statusEl.textContent = `✅ Current resume: ${resumeFilename}`;
     statusEl.style.color = "green";
+    toggleElements({ showUpload: false, showCurrent: true });
   } else {
-    uploadBtn.textContent = "Upload Resume";
     statusEl.textContent = "⚠️ No resume uploaded";
     statusEl.style.color = "orange";
+    toggleElements({ showUpload: true, showCurrent: false });
   }
 }
 
 // Call on load
-window.addEventListener("DOMContentLoaded", updateButtonText);
+window.addEventListener("DOMContentLoaded", updateUI);
 
-// Upload resume PDF and store returned embedding
+// Upload resume PDF
 uploadBtn.addEventListener("click", async () => {
   const file = fileInput.files[0];
   if (!file) {
@@ -46,7 +55,7 @@ uploadBtn.addEventListener("click", async () => {
     console.log("Raw response object:", response);
 
     if (!response.ok) {
-      const text = await response.text(); // get error text for logging
+      const text = await response.text();
       console.error("Server responded with error:", text);
       throw new Error(`HTTP ${response.status} - ${response.statusText}`);
     }
@@ -57,9 +66,9 @@ uploadBtn.addEventListener("click", async () => {
     const embedding = result.embedding_preview || [];
     await chrome.storage.local.set({ resumeEmbedding: embedding, resumeFilename: file.name });
 
-    statusEl.textContent = `✅ Resume uploaded: ${file.name}`;
+    statusEl.textContent = `✅ Current resume: ${file.name}`;
     statusEl.style.color = "green";
-    updateButtonText();
+    toggleElements({ showUpload: false, showCurrent: true });
   } catch (err) {
     console.error("Upload error:", err);
     statusEl.textContent = `Failed to upload: ${err.message}`;
@@ -72,6 +81,6 @@ clearBtn.addEventListener("click", async () => {
   await chrome.storage.local.remove(["resumeEmbedding", "resumeFilename"]);
   statusEl.textContent = "⚠️ No resume uploaded";
   statusEl.style.color = "orange";
-  uploadBtn.textContent = "Upload Resume";
   fileInput.value = "";
+  toggleElements({ showUpload: true, showCurrent: false });
 });

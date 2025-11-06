@@ -91,9 +91,30 @@ async function processJobCard(card) {
   if (!badge) {
     badge = makeBadge("Click to rate");
     titleEl.appendChild(badge);
-  } else {
-    badge.style.backgroundColor = "#2e7d32";
   }
+
+  // --- NEW: check if user has a resume uploaded ---
+  const { resumeFilename } = await chrome.storage.local.get("resumeFilename");
+
+  if (!resumeFilename) {
+  badge.textContent = " Upload resume to get eval";
+  badge.style.backgroundColor = "#757575";
+  badge.style.cursor = "pointer";
+
+  // Click opens the popup and stops propagation
+  badge.onclick = (e) => {
+    e.stopPropagation();
+    chrome.runtime.sendMessage({ action: "openPopup" });
+  };
+
+  card.dataset.jobfitProcessed = "true";
+  return; // Skip scoring logic
+}
+
+  // If resume exists, normal badge
+  badge.textContent = " Click to rate";
+  badge.style.backgroundColor = "#2e7d32";
+  badge.style.cursor = "default";
 
   const clickHandler = async () => {
     const { resumeText } = await chrome.storage.local.get("resumeText");
