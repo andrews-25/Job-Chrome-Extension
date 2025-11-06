@@ -119,6 +119,16 @@ async function processJobCard(card) {
   const badge = createOrUpdateBadge(card, resumeExists);
   if (!badge) return;
 
+  // Check if we already have a cached score for this job
+  const cachedScores = (await chrome.storage.local.get("jobScores")).jobScores || {};
+  if (cachedScores[jobId]) {
+    const score = cachedScores[jobId];
+    badge.textContent = score;
+    badge.dataset.scored = "true";
+    badge.style.backgroundColor = score >= 8 ? "#2e7d32" : score >= 6 ? "#fbc02d" : "#c62828";
+    console.log("[JobFit] Loaded cached score:", { jobId, score });
+  }
+
   const clickHandler = async () => {
     // Re-check resume existence at click time instead of using captured value
     const currentResumeExists = await hasResume();

@@ -77,6 +77,13 @@ uploadBtn.addEventListener("click", async () => {
       resumeFilename: file.name,
     });
 
+
+    // Clear old scores since we have a new resume
+    await chrome.storage.local.remove(["jobScores"]);
+
+
+
+
     console.log("[JobFit] Resume saved to storage:", file.name);
 
     await updateUI();
@@ -100,7 +107,7 @@ uploadBtn.addEventListener("click", async () => {
 // ---- Clear resume ----
 clearBtn.addEventListener("click", async () => {
   console.log("[JobFit] Clearing resume data...");
-  await chrome.storage.local.remove(["resumeEmbedding", "resumeFilename"]);
+  await chrome.storage.local.remove(["resumeEmbedding", "resumeFilename", "jobScores"]);
   await updateUI();
 
   // Notify content script
