@@ -38,28 +38,24 @@ async def upload_resume(file: UploadFile = File(...)):
         "embedding_preview": fake_embedding[:5].tolist(),
     }
 
-# ---- Compare stored embedding to job description (future use) ----
-# @app.post("/getscore")
-# async def get_score(job_description: str = Form(...)):
-#     if not os.path.exists(EMBEDDING_PATH):
-#         return {"error": "No stored resume embedding found. Please upload your resume first."}
-#
-#     # Load the stored resume embedding
-#     resume_embedding = np.load(EMBEDDING_PATH)
-#
-#     # Create embedding for job description using OpenAI
-#     job_embedding = client.embeddings.create(
-#         model="text-embedding-3-small",
-#         input=job_description
-#     ).data[0].embedding
-#
-#     # Compute cosine similarity
-#     def cosine_similarity(a, b):
-#         a, b = np.array(a), np.array(b)
-#         return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
-#
-#     score = cosine_similarity(resume_embedding, job_embedding)
-#     score_percent = round(score * 100, 2)
-#     feedback = f"Your resume matches this job posting by approximately {score_percent}%."
-#
-#     return {"score": score_percent, "feedback": feedback}
+class JobRequest(BaseModel):
+    job_id: str
+    description: str
+    resume_embedding: list[float]
+
+#---- Compare stored embedding to job description (future use) ----
+@app.post("/getscore")
+async def get_score(data: JobRequest):
+    job_id = data.job_id
+    description = data.description
+    resume_embedding = data.resume_embedding
+
+    desc_score = len(description.split()) % 10  # vary by job description size
+    embed_score = int(sum(embedding) % 10) if embedding else 0
+
+    combined = (desc_score + embed_score) / 2
+    score = round(min(10, max(0, combined)), 1)
+
+    return {"job_id": job_id,
+            "score": score 
+    }

@@ -7,26 +7,8 @@ const pendingTokens = {};
 
 // Local scoring function (placeholder for backend)
 async function getScore({ title, company, location, description }) {
-  await new Promise((res) => setTimeout(res, 500)); // simulate delay
 
-  const keywords = ["finance", "data", "analysis", "energy", "trading", "python", "sql", "market"];
-  const descLower = description.toLowerCase();
-
-  let matchCount = 0;
-  for (const word of keywords) {
-    if (descLower.includes(word)) matchCount++;
-  }
-
-  const score = Math.min(10, Math.round((matchCount / keywords.length) * 10)) || 5;
-
-  const feedback =
-    score > 8
-      ? "Strong match! This role fits your likely skill set well."
-      : score > 5
-      ? "Moderate match. Some overlap, but review the details."
-      : "Weak match. Probably not ideal for your profile.";
-
-  return { score, feedback };
+  return {score};
 }
 
 // Wait for job description to stabilize or contain title
@@ -156,6 +138,8 @@ function processJobCard(card) {
         feedback,
         descriptionSnippet: description.slice(0, 120),
       });
+
+
     } catch (err) {
       console.error("JobFit error while fetching description:", err);
       badge.textContent = " !err";
